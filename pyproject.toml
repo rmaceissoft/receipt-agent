@@ -1,0 +1,10 @@
+[project]
+name = "receipt_agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.116.1",
+    "logfire[fastapi]>=4.3.6",
+    "pydantic-ai[logfire]>=0.8.0",
+    "python-dotenv>=1.1.1",
+]
