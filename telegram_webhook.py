@@ -62,8 +62,89 @@ from agent import run_receipt_agent, ReceiptInfo
 
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-TELEGRAM_FILE_BASE_URL = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
+
+class TelegramBotClient:
+    def __init__(self, bot_token: str):
+        self._bot_token = bot_token
+        self.base_url = f"https://api.telegram.org/bot{self._bot_token}"
+        self.file_base_url = f"https://api.telegram.org/file/bot{self._bot_token}"
+
+    async def _make_request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[dict] = None,
+        data: Optional[dict] = None,
+    ):
+        """
+        Helper to make HTTP requests to the Telegram API, handling client lifecycle and errors.
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.request(
+                    method, f"{self.base_url}/{endpoint}", data=data, params=params
+                )
+                resp.raise_for_status()
+                return resp.json().get("result", {})
+            except httpx.HTTPStatusError as ex:
+                print(f"HTTP error during Telegram API call to {endpoint}: {ex}")
+                return None
+            except Exception as ex:
+                print(
+                    f"An unexpected error occurred during Telegram API call to {endpoint}: {ex}"
+                )
+                return None
+
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: Optional[Literal["MarkdownV2", "HTML", "Markdown"]] = None,
+    ):
+        """
+        Send a message to a specific chat ID.
+
+        Args:
+            chat_id (int): The Telegram chat ID to send the message to
+            text (str): The message text to send
+            parse_mode (Optional[Literal]): The parse mode for the message text.
+        """
+        data = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            data["parse_mode"] = parse_mode
+        return await self._make_request("POST", "sendMessage", data=data)
+
+    async def get_file(self, file_id: str):
+        """
+        Get information about a file from Telegram.
+
+        Args:
+            file_id (str): The file_id of the file to get information about.
+
+        Returns:
+            dict: A dictionary containing file information, including 'file_path'.
+        """
+        params = {"file_id": file_id}
+        return await self._make_request("GET", "getFile", params=params)
+
+    async def get_photo_url(self, file_id: str) -> Optional[str]:
+        """
+        Get the direct download URL for a photo file.
+
+        Args:
+            file_id (str): The file_id of the photo to get the URL for.
+
+        Returns:
+            Optional[str]: The direct download URL for the photo, or None if failed.
+        """
+        file_info = await self.get_file(file_id)
+        if file_info and "file_path" in file_info:
+            return f"{self.file_base_url}/{file_info['file_path']}"
+        return None
+
+
+# Create Telegram client instance at module level
+telegram_client = TelegramBotClient(bot_token=TELEGRAM_BOT_TOKEN)
 
 
 app = FastAPI()
@@ -72,45 +153,6 @@ app = FastAPI()
 logfire.configure(service_name="telegram-webhook")
 logfire.instrument_fastapi(app)
 logfire.instrument_pydantic_ai()
-
-
-async def send_message(
-    chat_id: int,
-    text: str,
-    parse_mode: Optional[Literal["MarkdownV2", "HTML", "Markdown"]] = None,
-):
-    """
-    Send a message to a specific chat ID.
-
-    Args:
-        chat_id (int): The Telegram chat ID to send the message to
-        text (str): The message text to send
-    """
-    async with httpx.AsyncClient() as client:
-        try:
-            data = {"chat_id": chat_id, "text": text}
-            if parse_mode:
-                data["parse_mode"] = parse_mode
-            resp = await client.post(
-                f"{TELEGRAM_BASE_URL}/sendMessage",
-                data=data,
-            )
-            resp.raise_for_status()
-            return resp.json().get("result", {})
-        except httpx.HTTPStatusError as ex:
-            print(ex)
-
-
-async def get_file(file_id: str):
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"{TELEGRAM_BASE_URL}/getFile", params={"file_id": file_id}
-            )
-            resp.raise_for_status()
-            return resp.json().get("result", {})
-        except httpx.HTTPStatusError as ex:
-            print(ex)
 
 
 def _format_html_receipt_data_for_telegram(receipt_data: ReceiptInfo) -> str:
@@ -153,19 +195,18 @@ async def webhook(request: Request):
 
         photo, photo_url = message.get("photo"), None
         if photo:
-            file_info = await get_file(photo[-1]["file_id"])
-            photo_url = f"{TELEGRAM_FILE_BASE_URL}/{file_info['file_path']}"
+            photo_url = await telegram_client.get_photo_url(photo[-1]["file_id"])
         if photo_url:
             receipt_data = await run_receipt_agent(photo_url, text)
             if receipt_data:
                 human_readable_text = _format_html_receipt_data_for_telegram(
                     receipt_data
                 )
-                await send_message(
+                await telegram_client.send_message(
                     chat_id=chat_id, text=human_readable_text, parse_mode="HTML"
                 )
             else:
-                await send_message(
+                await telegram_client.send_message(
                     chat_id=chat_id,
                     text="Sorry, I couldn't process the receipt. Please try again later.",
                 )
