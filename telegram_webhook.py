@@ -4,47 +4,6 @@ Telegram Bot Webhook Implementation
 This module provides a FastAPI-based webhook endpoint for handling Telegram bot updates.
 The webhook receives incoming messages and automatically responds to users.
 
-SETUP INSTRUCTIONS:
-==================
-
-1. Environment Variables:
-   Create a .env file with your bot token:
-   ```
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   ```
-
-2. Start the FastAPI server:
-   ```bash
-   uvicorn telegram_webhook:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-3. Expose your local server to the internet using ngrok:
-   ```bash
-   ngrok http 8000
-   ```
-
-4. Set the webhook URL using the curl command below:
-   Replace <ngrok_url> with your actual ngrok URL and <YOUR_BOT_TOKEN> with your bot token.
-
-   ```bash
-   curl -F "url=https://<ngrok_url>/webhook" \
-     https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook
-   ```
-
-   Example:
-   ```bash
-   curl -F "url=https://abc123.ngrok.io/webhook" \
-     https://api.telegram.org/bot1234567890:ABCdefGHIjklMNOpqrsTUVwxyz/setWebhook
-   ```
-
-5. Verify webhook is set:
-   ```bash
-   curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
-   ```
-
-6. Test your bot by sending a message in Telegram!
-
-For more information on the `setWebhook` API method, visit: https://core.telegram.org/bots/api#setwebhook
 """
 
 import os
