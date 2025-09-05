@@ -8,3 +8,8 @@ dependencies = [
     "pydantic-ai[logfire]>=0.8.0",
     "python-dotenv>=1.1.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pyngrok>=7.3.0",
+]

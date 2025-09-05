@@ -48,6 +48,8 @@ For more information on the `setWebhook` API method, visit: https://core.telegra
 """
 
 import os
+import sys
+from contextlib import asynccontextmanager
 from typing import Literal, Optional
 
 import httpx
@@ -61,7 +63,9 @@ from fastapi import FastAPI, Request
 from agent import run_receipt_agent, ReceiptInfo
 
 
+USE_NGROK = os.getenv("USE_NGROK")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
 
 class TelegramBotClient:
     def __init__(self, bot_token: str):
@@ -142,12 +146,75 @@ class TelegramBotClient:
             return f"{self.file_base_url}/{file_info['file_path']}"
         return None
 
+    async def set_webhook(self, webhook_url: str) -> Optional[dict]:
+        """
+        Set the webhook URL for the bot.
+        
+        This is equivalent to the curl command:
+        curl -F "url=https://<ngrok_url>/webhook" \
+          https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook
+
+        Args:
+            webhook_url (str): The webhook URL to set (e.g., "https://abc123.ngrok.io/webhook")
+
+        Returns:
+            Optional[dict]: The response from Telegram API, or None if failed.
+        """
+        data = {"url": webhook_url}
+        return await self._make_request("POST", "setWebhook", data=data)
+
+    async def delete_webhook(self, drop_pending_updates=True):
+        """
+        Remove the webhook URL for the bot.
+
+        This is equivalent to the curl command:
+        curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/deleteWebhook
+        """
+        data = {"drop_pending_updates": drop_pending_updates}
+        await self._make_request("POST", "deleteWebhook", data=data)
+
+    async def get_webhook_info(self) -> Optional[dict]:
+        """
+        Get current webhook information.
+
+        This is equivalent to the curl command:
+        curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
+
+        Returns:
+            Optional[dict]: The webhook information from Telegram API, or None if failed.
+        """
+        return await self._make_request("GET", "getWebhookInfo")
+
 
 # Create Telegram client instance at module level
 telegram_client = TelegramBotClient(bot_token=TELEGRAM_BOT_TOKEN)
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    public_url = None
+    if USE_NGROK:
+        # open ngrok tunnel
+        from pyngrok import ngrok
+
+        # Get the dev server port (defaults to 8000 for Uvicorn, can be overridden with `--port`
+        # when starting the server
+        port = (
+            sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else "8000"
+        )
+        public_url = ngrok.connect(port).public_url
+        print(public_url)
+        # set telegram bot webhook
+        await telegram_client.set_webhook(f"{public_url}/webhook")
+    yield
+    if public_url:
+        # delete telegram bot webhook
+        await telegram_client.delete_webhook()
+        # close ngrok tunnel
+        ngrok.disconnect(public_url)
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 logfire.configure(service_name="telegram-webhook")
