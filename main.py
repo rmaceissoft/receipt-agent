@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # take  env variables
 
-from agent import run_receipt_agent
+from agent import run_receipt_agent, InvalidReceipt
 
 
 def main():
@@ -27,6 +27,8 @@ def main():
     logfire.configure(service_name="receipt-agent-cli")
     logfire.instrument_pydantic_ai()
     output = asyncio.run(run_receipt_agent(receipt_path=receipt_filepath))
+    if isinstance(output, InvalidReceipt):
+        print("The provided image was not recognized as a valid receipt.")
     print(output)
 
 

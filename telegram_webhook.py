@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import BackgroundTasks, FastAPI, Request
 
-from agent import run_receipt_agent, ReceiptInfo
+from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo
 
 
 USE_NGROK = os.getenv("USE_NGROK")
@@ -220,10 +220,15 @@ async def handle_incoming_message(message: dict[str, Any]) -> None:
         photo_url = await telegram_client.get_photo_url(photo[-1]["file_id"])
     if photo_url:
         receipt_data = await run_receipt_agent(photo_url, text)
-        if receipt_data:
+        if isinstance(receipt_data, ReceiptInfo):
             human_readable_text = _format_html_receipt_data_for_telegram(receipt_data)
             await telegram_client.send_message(
                 chat_id=chat_id, text=human_readable_text, parse_mode="HTML"
+            )
+        elif isinstance(receipt_data, InvalidReceipt):
+            await telegram_client.send_message(
+                chat_id=chat_id,
+                text="The provided image was not recognized as a valid receipt.",
             )
         else:
             await telegram_client.send_message(

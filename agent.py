@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, TypeAlias
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, BinaryContent, ImageUrl
@@ -11,6 +11,8 @@ from pydantic_ai.providers.github import GitHubProvider
 
 
 class ReceiptInfo(BaseModel):
+    """Represents structured data extracted from a valid receipt image."""
+
     issued_at: datetime = Field(description="Date and time when the receipt was issued")
     vendor_name: Optional[str] = Field(description="Receipt Vendor Name")
     vendor_ruc: Optional[str] = Field(
@@ -40,6 +42,18 @@ class ReceiptInfo(BaseModel):
     """
 
 
+class InvalidReceipt(BaseModel):
+    """
+    Represents the response when an image is not recognized as a valid receipt.
+    This includes cases where:
+    - The image is not a receipt at all.
+    - The image quality is too poor to extract meaningful data.
+    - The image contains a receipt-like document but lacks essentual information.
+    """
+
+    pass
+
+
 # use github models provider
 model = OpenAIChatModel(
     "openai/gpt-4.1-mini",
@@ -50,16 +64,19 @@ model = OpenAIChatModel(
 )
 
 
+ReceiptAgentOutput: TypeAlias = ReceiptInfo | InvalidReceipt
+
+
 receipt_agent = Agent(
     model=model,
-    output_type=ReceiptInfo,
+    output_type=ReceiptAgentOutput,
     instructions="You are an expert in reading receipts provided as images. Your goal is to extract key fields accurately and return them in strict JSON format",
 )
 
 
 async def run_receipt_agent(
     receipt_path: Path | str, text: Optional[str] = None
-) -> ReceiptInfo | None:
+) -> ReceiptAgentOutput | None:
     image = (
         ImageUrl(url=receipt_path)
         if isinstance(receipt_path, str)
