@@ -5,7 +5,8 @@ from pathlib import Path
 
 import logfire
 from dotenv import load_dotenv
-load_dotenv()   # take  env variables
+
+load_dotenv()  # take  env variables
 
 from agent import run_receipt_agent
 
@@ -13,12 +14,9 @@ from agent import run_receipt_agent
 def main():
     parser = argparse.ArgumentParser(
         prog="Receipt Agent",
-        description="A tool to extract structured receipt data from receipts"
+        description="A tool to extract structured receipt data from receipts",
     )
-    parser.add_argument(
-        "receipt_path",
-        help="Path to the receipt file"
-    )
+    parser.add_argument("receipt_path", help="Path to the receipt file")
     args = parser.parse_args()
     receipt_filepath = Path(args.receipt_path)
 
