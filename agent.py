@@ -16,6 +16,9 @@ class ReceiptInfo(BaseModel):
     vendor_ruc: Optional[str] = Field(
         description="Receipt Vendor RUC. Ignore for Yape and Plin"
     )
+    currency: str = Field(
+        description="Currency code of the receipt (e.g., 'PEN' for Peruvian Sol, 'USD' for US Dollar). Use ISO 4217 standard currency codes when possible."
+    )
     total_amount: Decimal = Field(
         max_digits=10, decimal_places=2, description="Total Amount"
     )

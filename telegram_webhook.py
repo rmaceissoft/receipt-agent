@@ -188,6 +188,7 @@ def _format_html_receipt_data_for_telegram(receipt_data: ReceiptInfo) -> str:
     📅 <b>Issued At:</b> {receipt_data.issued_at.strftime("%B %d, %Y at %I:%M %p")}
     🏢 <b>Vendor Name:</b> {receipt_data.vendor_name}
     🆔 <b>Vendor RUC:</b> {receipt_data.vendor_ruc}
+    🪙 <b>Currency:</b> {receipt_data.currency}
     💰 <b>Total Amount:</b> {receipt_data.total_amount:.2f}
     💸 <b>Tip:</b> {receipt_data.tip:.2f}
     💳 <b>Payment Method:</b> {payment_method_display}
