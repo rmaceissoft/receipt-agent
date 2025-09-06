@@ -9,7 +9,7 @@ The webhook receives incoming messages and automatically responds to users.
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import httpx
 import logfire
@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 
 from agent import run_receipt_agent, ReceiptInfo
 
@@ -196,15 +196,50 @@ def _format_html_receipt_data_for_telegram(receipt_data: ReceiptInfo) -> str:
     return _html
 
 
+async def handle_incoming_message(message: dict[str, Any]) -> None:
+    """
+    Process incoming Telegram message containing receipt photos
+
+    The function specifically looks for photos in messages and uses the highest
+    resolution version available. If a photo is found, it runs the receipt
+    processing agent and send formatted results back to the user via Telegram.
+
+    Args:
+        message (dict[str, Any]): Telegram message object
+
+    Returns:
+        None: This function performs side effects (sending messages)
+    """
+    chat_id = message["chat"]["id"]
+
+    text = message.get("text") or message.get("caption")
+
+    photo, photo_url = message.get("photo"), None
+    if photo:
+        photo_url = await telegram_client.get_photo_url(photo[-1]["file_id"])
+    if photo_url:
+        receipt_data = await run_receipt_agent(photo_url, text)
+        if receipt_data:
+            human_readable_text = _format_html_receipt_data_for_telegram(receipt_data)
+            await telegram_client.send_message(
+                chat_id=chat_id, text=human_readable_text, parse_mode="HTML"
+            )
+        else:
+            await telegram_client.send_message(
+                chat_id=chat_id,
+                text="Sorry, I couldn't process the receipt. Please try again later.",
+            )
+
+
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Webhook endpoint that receives Telegram updates.
 
     This endpoint:
     1. Receives POST requests from Telegram with bot updates
     2. Extracts message information from the update
-    3. Sends a response back to the user
+    3. Sends a response back to the user (processed in the background)
 
     Args:
         request (Request): FastAPI request object containing the Telegram update
@@ -215,26 +250,6 @@ async def webhook(request: Request):
     body = await request.json()
     message = body.get("message", {})
     if message:
-        chat_id = message["chat"]["id"]
-
-        text = message.get("text") or message.get("caption")
-
-        photo, photo_url = message.get("photo"), None
-        if photo:
-            photo_url = await telegram_client.get_photo_url(photo[-1]["file_id"])
-        if photo_url:
-            receipt_data = await run_receipt_agent(photo_url, text)
-            if receipt_data:
-                human_readable_text = _format_html_receipt_data_for_telegram(
-                    receipt_data
-                )
-                await telegram_client.send_message(
-                    chat_id=chat_id, text=human_readable_text, parse_mode="HTML"
-                )
-            else:
-                await telegram_client.send_message(
-                    chat_id=chat_id,
-                    text="Sorry, I couldn't process the receipt. Please try again later.",
-                )
+        background_tasks.add_task(handle_incoming_message, message)
 
     return {"ok": True}
