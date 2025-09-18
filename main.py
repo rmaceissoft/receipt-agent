@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -24,12 +25,17 @@ def main():
     if not receipt_filepath.exists():
         sys.exit(1)
 
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
     logfire.configure(service_name="receipt-agent-cli")
     logfire.instrument_pydantic_ai()
     output = asyncio.run(run_receipt_agent(receipt_path=receipt_filepath))
     if isinstance(output, InvalidReceipt):
-        print("The provided image was not recognized as a valid receipt.")
-    print(output)
+        logging.error("The provided image was not recognized as a valid receipt.")
+    logging.info(output)
 
 
 if __name__ == "__main__":

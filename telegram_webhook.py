@@ -6,6 +6,7 @@ The webhook receives incoming messages and automatically responds to users.
 
 """
 
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -24,6 +25,9 @@ from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo
 
 USE_NGROK = os.getenv("USE_NGROK")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class TelegramBotClient:
@@ -50,10 +54,10 @@ class TelegramBotClient:
                 resp.raise_for_status()
                 return resp.json().get("result", {})
             except httpx.HTTPStatusError as ex:
-                print(f"HTTP error during Telegram API call to {endpoint}: {ex}")
+                logger.error(f"HTTP error during Telegram API call to {endpoint}: {ex}")
                 return None
             except Exception as ex:
-                print(
+                logger.error(
                     f"An unexpected error occurred during Telegram API call to {endpoint}: {ex}"
                 )
                 return None
@@ -162,7 +166,7 @@ async def lifespan(app: FastAPI):
             sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else "8000"
         )
         public_url = ngrok.connect(port).public_url
-        print(public_url)
+        logger.info(f"Ngrok tunnel established: {public_url}")
         # set telegram bot webhook
         await telegram_client.set_webhook(f"{public_url}/webhook")
     yield
