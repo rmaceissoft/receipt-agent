@@ -37,6 +37,17 @@ class TelegramBotAPIError(Exception):
 
 
 class TelegramBotClient:
+    """Client for interacting with the Telegram Bot API.
+
+    This class provides methods to send messages, retrieve file information,
+    and manage webhooks for a Telegram bot.
+
+    Attributes:
+        _bot_token (str): The Telegram bot token.
+        base_url (str): The base URL for Telegram Bot API requests.
+        file_base_url (str): The base URL for downloading Telegram files.
+    """
+
     def __init__(self, bot_token: str):
         self._bot_token = bot_token
         self.base_url = f"https://api.telegram.org/bot{self._bot_token}"
@@ -51,6 +62,18 @@ class TelegramBotClient:
     ):
         """
         Helper to make HTTP requests to the Telegram API, handling client lifecycle and errors.
+
+        Args:
+            method (str): The HTTP method (e.g., "GET", "POST").
+            endpoint (str): The API endpoint to call (e.g., "sendMessage").
+            params (Optional[dict]): Dictionary of query parameters.
+            data (Optional[dict]): Dictionary of form data or JSON payload.
+
+        Returns:
+            dict: The JSON result from the Telegram API response.
+
+        Raises:
+            TelegramBotAPIError: If an HTTP error occurs during the request.
         """
         async with httpx.AsyncClient() as client:
             try:
@@ -72,16 +95,20 @@ class TelegramBotClient:
         Send a message to a specific chat ID.
 
         Args:
-            chat_id (int): The Telegram chat ID to send the message to
-            text (str): The message text to send
+            chat_id (int): The Telegram chat ID to send the message to.
+            text (str): The message text to send.
             parse_mode (Optional[Literal]): The parse mode for the message text.
+                Can be "MarkdownV2", "HTML", or "Markdown".
+
+        Returns:
+            dict: The response from the Telegram API.
         """
         data = {"chat_id": chat_id, "text": text}
         if parse_mode:
             data["parse_mode"] = parse_mode
         return await self._make_request("POST", "sendMessage", data=data)
 
-    async def get_file(self, file_id: str):
+    async def get_file(self, file_id: str) -> dict[str, Any]:
         """
         Get information about a file from Telegram.
 
@@ -89,7 +116,7 @@ class TelegramBotClient:
             file_id (str): The file_id of the file to get information about.
 
         Returns:
-            dict: A dictionary containing file information, including 'file_path'.
+            dict[str, Any]: A dictionary containing file information, including 'file_path'.
         """
         params = {"file_id": file_id}
         return await self._make_request("GET", "getFile", params=params)
@@ -102,14 +129,14 @@ class TelegramBotClient:
             file_id (str): The file_id of the photo to get the URL for.
 
         Returns:
-            Optional[str]: The direct download URL for the photo, or None if failed.
+            Optional[str]: The direct download URL for the photo.
         """
         file_info = await self.get_file(file_id)
         if file_info and "file_path" in file_info:
             return f"{self.file_base_url}/{file_info['file_path']}"
         return None
 
-    async def set_webhook(self, webhook_url: str) -> Optional[dict]:
+    async def set_webhook(self, webhook_url: str) -> None:
         """
         Set the webhook URL for the bot.
         
@@ -118,25 +145,26 @@ class TelegramBotClient:
           https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook
 
         Args:
-            webhook_url (str): The webhook URL to set (e.g., "https://abc123.ngrok.io/webhook")
-
-        Returns:
-            Optional[dict]: The response from Telegram API, or None if failed.
+            webhook_url (str): The webhook URL to set (e.g., "https://abc123.ngrok.io/webhook").
         """
         data = {"url": webhook_url}
-        return await self._make_request("POST", "setWebhook", data=data)
+        await self._make_request("POST", "setWebhook", data=data)
 
-    async def delete_webhook(self, drop_pending_updates=True):
+    async def delete_webhook(self, drop_pending_updates=True) -> None:
         """
         Remove the webhook URL for the bot.
 
         This is equivalent to the curl command:
         curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/deleteWebhook
+
+        Args:
+            drop_pending_updates (bool): If True, pending updates will be dropped.
+                Defaults to True.
         """
         data = {"drop_pending_updates": drop_pending_updates}
         await self._make_request("POST", "deleteWebhook", data=data)
 
-    async def get_webhook_info(self) -> Optional[dict]:
+    async def get_webhook_info(self) -> dict[str, Any]:
         """
         Get current webhook information.
 
@@ -144,7 +172,7 @@ class TelegramBotClient:
         curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
 
         Returns:
-            Optional[dict]: The webhook information from Telegram API, or None if failed.
+            dict[str, Any]: The webhook information from Telegram API.
         """
         return await self._make_request("GET", "getWebhookInfo")
 
@@ -155,6 +183,19 @@ telegram_client = TelegramBotClient(bot_token=TELEGRAM_BOT_TOKEN)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager for managing ngrok tunnel and Telegram webhook.
+
+    This context manager handles the setup and teardown of an ngrok tunnel
+    and the Telegram bot webhook. If USE_NGROK is enabled, it establishes
+    a tunnel, sets the webhook, and cleans them up on exit.
+
+    Args:
+        app (FastAPI): The FastAPI application instance.
+
+    Yields:
+        None
+    """
     public_url = None
     if USE_NGROK:
         # open ngrok tunnel
@@ -203,6 +244,16 @@ logfire.instrument_pydantic_ai()
 
 
 def _format_html_receipt_data_for_telegram(receipt_data: ReceiptInfo) -> str:
+    """
+    Formats extracted receipt data into an HTML string suitable for Telegram messages.
+
+    Args:
+        receipt_data (ReceiptInfo): An instance of ReceiptInfo containing the
+            structured data extracted from a receipt.
+
+    Returns:
+        str: An HTML formatted string with receipt details.
+    """
     payment_method_display = receipt_data.payment_method.replace("_", " ").title()
     _html = f"""
     🧾 <b>Receipt Details:</b>    
@@ -274,10 +325,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     3. Sends a response back to the user (processed in the background)
 
     Args:
-        request (Request): FastAPI request object containing the Telegram update
+        request (Request): FastAPI request object containing the Telegram update.
+        background_tasks (BackgroundTasks): FastAPI dependency for running tasks in the background.
 
     Returns:
-        dict: Confirmation that the webhook was processed
+        dict: Confirmation that the webhook was processed.
     """
     body = await request.json()
     message = body.get("message", {})

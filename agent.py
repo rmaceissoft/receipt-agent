@@ -69,6 +69,12 @@ model = OpenAIChatModel(
 )
 
 
+"""
+Type alias for the possible outputs of the receipt agent.
+
+This can be either `ReceiptInfo` if the receipt is successfully processed,
+or `InvalidReceipt` if the image is not recognized as a valid receipt.
+"""
 ReceiptAgentOutput: TypeAlias = ReceiptInfo | InvalidReceipt
 
 
@@ -80,12 +86,32 @@ receipt_agent = Agent(
 
 
 class ReceiptProcessingError(Exception):
+    """Exception raised for errors that occur during receipt processing."""
+
     pass
 
 
 async def run_receipt_agent(
     receipt_path: Path | str, text: Optional[str] = None
 ) -> ReceiptAgentOutput:
+    """Runs the receipt processing agent to extract structured data from a receipt.
+
+    Args:
+        receipt_path: The path to the receipt file (as a `Path` object) or a URL
+            to the receipt image (as a `str`).
+        text: Optional additional text context to provide to the agent,
+            e.g., a user query related to the receipt.
+
+    Returns:
+        ReceiptAgentOutput: An instance of `ReceiptInfo` if the receipt is
+            successfully processed and data is extracted, or an `InvalidReceipt`
+            instance if the image is not recognized as a valid receipt or
+            lacks essential information.
+
+    Raises:
+        ReceiptProcessingError: If an underlying `AgentRunError` occurs during
+            the processing by the receipt agent.
+    """
     image = (
         ImageUrl(url=receipt_path)
         if isinstance(receipt_path, str)
