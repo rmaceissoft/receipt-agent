@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -8,6 +9,10 @@ from pydantic_ai import Agent, BinaryContent, ImageUrl
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.github import GitHubProvider
+
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class ReceiptInfo(BaseModel):
@@ -74,9 +79,13 @@ receipt_agent = Agent(
 )
 
 
+class ReceiptProcessingError(Exception):
+    pass
+
+
 async def run_receipt_agent(
     receipt_path: Path | str, text: Optional[str] = None
-) -> ReceiptAgentOutput | None:
+) -> ReceiptAgentOutput:
     image = (
         ImageUrl(url=receipt_path)
         if isinstance(receipt_path, str)
@@ -86,7 +95,8 @@ async def run_receipt_agent(
     user_content = (text, image) if text else (image,)
 
     try:
-        result = await receipt_agent.run(user_content)
-    except AgentRunError:
-        return None
-    return result.output
+        agent_run = await receipt_agent.run(user_content)
+        return agent_run.output
+    except AgentRunError as ex:
+        logger.error(f"Error processing receipt: {ex}")
+        raise ReceiptProcessingError(f"Error processing receipt: {ex}")

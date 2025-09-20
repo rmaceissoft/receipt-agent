@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import BackgroundTasks, FastAPI, Request
 
-from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo
+from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo, ReceiptProcessingError
 
 
 USE_NGROK = os.getenv("USE_NGROK")
@@ -243,15 +243,18 @@ async def handle_incoming_message(message: dict[str, Any]) -> None:
         except TelegramBotAPIError as ex:
             logger.error(f"Telegram Error getting the photo url: {ex}")
     if photo_url:
-        receipt_data = await run_receipt_agent(photo_url, text)
         text, parse_mode = None, None
-        if isinstance(receipt_data, ReceiptInfo):
-            text = _format_html_receipt_data_for_telegram(receipt_data)
-            parse_mode = "HTML"
-        elif isinstance(receipt_data, InvalidReceipt):
-            text = "The provided image was not recognized as a valid receipt."
-        else:
+        try:
+            receipt_output = await run_receipt_agent(photo_url, text)
+            if isinstance(receipt_output, ReceiptInfo):
+                text = _format_html_receipt_data_for_telegram(receipt_output)
+                parse_mode = "HTML"
+            elif isinstance(receipt_output, InvalidReceipt):
+                text = "The provided image was not recognized as a valid receipt."
+        except ReceiptProcessingError as ex:
             text = "Sorry, I couldn't process the receipt. Please try again later."
+
+        # send telegram message back to user
         try:
             await telegram_client.send_message(
                 chat_id=chat_id, text=text, parse_mode=parse_mode
