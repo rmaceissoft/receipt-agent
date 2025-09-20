@@ -30,6 +30,12 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 logger = logging.getLogger(__name__)
 
 
+class TelegramBotAPIError(Exception):
+    """Base exception for Telegram Bot API related errors."""
+
+    pass
+
+
 class TelegramBotClient:
     def __init__(self, bot_token: str):
         self._bot_token = bot_token
@@ -53,14 +59,8 @@ class TelegramBotClient:
                 )
                 resp.raise_for_status()
                 return resp.json().get("result", {})
-            except httpx.HTTPStatusError as ex:
-                logger.error(f"HTTP error during Telegram API call to {endpoint}: {ex}")
-                return None
-            except Exception as ex:
-                logger.error(
-                    f"An unexpected error occurred during Telegram API call to {endpoint}: {ex}"
-                )
-                return None
+            except httpx.HTTPError as ex:
+                raise TelegramBotAPIError(f"HTTP Exception for {ex.request.url}: {ex}")
 
     async def send_message(
         self,
@@ -159,22 +159,39 @@ async def lifespan(app: FastAPI):
     if USE_NGROK:
         # open ngrok tunnel
         from pyngrok import ngrok
+        from pyngrok.exception import PyngrokError
 
         # Get the dev server port (defaults to 8000 for Uvicorn, can be overridden with `--port`
         # when starting the server
         port = (
             sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else "8000"
         )
-        public_url = ngrok.connect(port).public_url
-        logger.info(f"Ngrok tunnel established: {public_url}")
-        # set telegram bot webhook
-        await telegram_client.set_webhook(f"{public_url}/webhook")
+        try:
+            # Establish tunnel
+            public_url = ngrok.connect(port).public_url
+            logger.info(f"Ngrok tunnel established: {public_url}")
+
+            # Set telegram bot webhook
+            webhook_url = f"{public_url}/webhook"
+            await telegram_client.set_webhook(webhook_url)
+            logger.info(f"Telegram webhook set to: {webhook_url}")
+        except (PyngrokError, TelegramBotAPIError) as ex:
+            logger.error(f"Failed to setup ngrok / telegram webhook: {ex}")
+            if public_url:
+                try:
+                    ngrok.disconnect(public_url)
+                except PyngrokError:
+                    pass
+                public_url = None
     yield
     if public_url:
-        # delete telegram bot webhook
-        await telegram_client.delete_webhook()
-        # close ngrok tunnel
-        ngrok.disconnect(public_url)
+        try:
+            # delete telegram bot webhook
+            await telegram_client.delete_webhook()
+            # close ngrok tunnel
+            ngrok.disconnect(public_url)
+        except (PyngrokError, TelegramBotAPIError) as ex:
+            logger.error(f"Failed to cleanup ngrok / telegram webhook: {ex}")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -221,24 +238,26 @@ async def handle_incoming_message(message: dict[str, Any]) -> None:
 
     photo, photo_url = message.get("photo"), None
     if photo:
-        photo_url = await telegram_client.get_photo_url(photo[-1]["file_id"])
+        try:
+            photo_url = await telegram_client.get_photo_url(photo[-1]["file_id"])
+        except TelegramBotAPIError as ex:
+            logger.error(f"Telegram Error getting the photo url: {ex}")
     if photo_url:
         receipt_data = await run_receipt_agent(photo_url, text)
+        text, parse_mode = None, None
         if isinstance(receipt_data, ReceiptInfo):
-            human_readable_text = _format_html_receipt_data_for_telegram(receipt_data)
-            await telegram_client.send_message(
-                chat_id=chat_id, text=human_readable_text, parse_mode="HTML"
-            )
+            text = _format_html_receipt_data_for_telegram(receipt_data)
+            parse_mode = "HTML"
         elif isinstance(receipt_data, InvalidReceipt):
-            await telegram_client.send_message(
-                chat_id=chat_id,
-                text="The provided image was not recognized as a valid receipt.",
-            )
+            text = "The provided image was not recognized as a valid receipt."
         else:
+            text = "Sorry, I couldn't process the receipt. Please try again later."
+        try:
             await telegram_client.send_message(
-                chat_id=chat_id,
-                text="Sorry, I couldn't process the receipt. Please try again later.",
+                chat_id=chat_id, text=text, parse_mode=parse_mode
             )
+        except TelegramBotAPIError as ex:
+            logger.error(f"Telegram Error sending message: {ex}")
 
 
 @app.post("/webhook")
