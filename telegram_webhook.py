@@ -24,6 +24,7 @@ from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo, ReceiptProcess
 
 
 USE_NGROK = os.getenv("USE_NGROK")
+USE_RENDER = os.getenv("RENDER")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Configure logging
@@ -181,6 +182,74 @@ class TelegramBotClient:
 telegram_client = TelegramBotClient(bot_token=TELEGRAM_BOT_TOKEN)
 
 
+def _get_public_url() -> tuple[str | None, bool]:
+    """
+    Get the public URL for the service and whether it needs cleanup.
+
+    Returns:
+        tuple: (public_url, needs_cleanup)
+    """
+    _public_url = None
+    _needs_ngrok_cleanup = False
+
+    # Check if running on Render.com
+    if USE_RENDER:
+        _public_url = os.getenv("RENDER_EXTERNAL_URL")
+        logger.info(f"Using Render URL: {_public_url}")
+    elif USE_NGROK:
+        # open ngrok tunnel
+        from pyngrok import ngrok
+        from pyngrok.exception import PyngrokError
+
+        # Get the dev server port (defaults to 8000 for Uvicorn, can be overridden with `--port`
+        # when starting the server
+        port = (
+            sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else "8000"
+        )
+        try:
+            # Establish tunnel
+            _public_url = ngrok.connect(port).public_url
+            _needs_ngrok_cleanup = True
+            logger.info(f"Ngrok tunnel established: {_public_url}")
+        except PyngrokError as ex:
+            logger.error(f"Failed to setup ngrok: {ex}")
+
+    return _public_url, _needs_ngrok_cleanup
+
+
+def _cleanup_ngrok(public_url: str) -> None:
+    """Safely disconnect ngrok tunnel."""
+    try:
+        from pyngrok import ngrok
+        from pyngrok.exception import PyngrokError
+
+        ngrok.disconnect(public_url)
+        logger.info("Ngrok tunnel disconnected")
+    except PyngrokError:
+        pass  # Suppress cleanup errors
+
+
+async def _setup_webhook(public_url: str) -> bool:
+    """Set up Telegram webhook."""
+    try:
+        webhook_url = f"{public_url}/webhook"
+        await telegram_client.set_webhook(webhook_url)
+        logger.info(f"Telegram webhook set to: {webhook_url}")
+        return True
+    except TelegramBotAPIError as ex:
+        logger.error(f"Failed to setup telegram webhook: {ex}")
+        return False
+
+
+async def _cleanup_webhook() -> None:
+    """Remove Telegram webhook."""
+    try:
+        await telegram_client.delete_webhook()
+        logger.info("Telegram webhook deleted")
+    except TelegramBotAPIError as ex:
+        logger.error(f"Failed to delete telegram webhook: {ex}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -196,43 +265,18 @@ async def lifespan(app: FastAPI):
     Yields:
         None
     """
-    public_url = None
-    if USE_NGROK:
-        # open ngrok tunnel
-        from pyngrok import ngrok
-        from pyngrok.exception import PyngrokError
-
-        # Get the dev server port (defaults to 8000 for Uvicorn, can be overridden with `--port`
-        # when starting the server
-        port = (
-            sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else "8000"
-        )
-        try:
-            # Establish tunnel
-            public_url = ngrok.connect(port).public_url
-            logger.info(f"Ngrok tunnel established: {public_url}")
-
-            # Set telegram bot webhook
-            webhook_url = f"{public_url}/webhook"
-            await telegram_client.set_webhook(webhook_url)
-            logger.info(f"Telegram webhook set to: {webhook_url}")
-        except (PyngrokError, TelegramBotAPIError) as ex:
-            logger.error(f"Failed to setup ngrok / telegram webhook: {ex}")
-            if public_url:
-                try:
-                    ngrok.disconnect(public_url)
-                except PyngrokError:
-                    pass
-                public_url = None
+    public_url, needs_ngrok_cleanup = _get_public_url()
+    if public_url:
+        # set telegram bot webhook
+        is_webhook_setup_successful = await _setup_webhook(public_url)
+        if not is_webhook_setup_successful and needs_ngrok_cleanup:
+            _cleanup_ngrok(public_url)
+            public_url = None
     yield
     if public_url:
-        try:
-            # delete telegram bot webhook
-            await telegram_client.delete_webhook()
-            # close ngrok tunnel
-            ngrok.disconnect(public_url)
-        except (PyngrokError, TelegramBotAPIError) as ex:
-            logger.error(f"Failed to cleanup ngrok / telegram webhook: {ex}")
+        await _cleanup_webhook()
+        if needs_ngrok_cleanup:
+            _cleanup_ngrok(public_url)
 
 
 app = FastAPI(lifespan=lifespan)
