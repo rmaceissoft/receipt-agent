@@ -238,7 +238,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-logfire.configure(service_name="telegram-webhook")
+logfire.configure(service_name="telegram-webhook", send_to_logfire="if-token-present")
 logfire.instrument_fastapi(app)
 logfire.instrument_pydantic_ai()
 

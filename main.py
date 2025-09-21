@@ -51,7 +51,9 @@ def main():
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    logfire.configure(service_name="receipt-agent-cli")
+    logfire.configure(
+        service_name="receipt-agent-cli", send_to_logfire="if-token-present"
+    )
     logfire.instrument_pydantic_ai()
     try:
         receipt_output = asyncio.run(run_receipt_agent(receipt_path=receipt_filepath))
