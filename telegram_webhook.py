@@ -337,3 +337,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(handle_incoming_message, message)
 
     return {"ok": True}
+
+
+@app.get("/healthz")
+async def health_check():
+    """Health check endpoint to verify service is running."""
+    return {"status": "healthy"}
