@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 import httpx
 import logfire
@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
 from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo, ReceiptProcessingError
 
@@ -26,6 +26,7 @@ from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo, ReceiptProcess
 USE_NGROK = os.getenv("USE_NGROK")
 USE_RENDER = os.getenv("RENDER")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_SECRET_TOKEN = os.getenv("TELEGRAM_BOT_SECRET_TOKEN")
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -137,7 +138,9 @@ class TelegramBotClient:
             return f"{self.file_base_url}/{file_info['file_path']}"
         return None
 
-    async def set_webhook(self, webhook_url: str) -> None:
+    async def set_webhook(
+        self, webhook_url: str, secret_token: Optional[str] = None
+    ) -> None:
         """
         Set the webhook URL for the bot.
         
@@ -147,8 +150,12 @@ class TelegramBotClient:
 
         Args:
             webhook_url (str): The webhook URL to set (e.g., "https://abc123.ngrok.io/webhook").
+            secret_token (Optional[str]): A secret token to be sent with every webhook request.
+                If set, Telegram will send an X-Telegram-Bot-Api-Secret-Token header.
         """
         data = {"url": webhook_url}
+        if secret_token:
+            data["secret_token"] = secret_token
         await self._make_request("POST", "setWebhook", data=data)
 
     async def delete_webhook(self, drop_pending_updates=True) -> None:
@@ -233,7 +240,9 @@ async def _setup_webhook(public_url: str) -> bool:
     """Set up Telegram webhook."""
     try:
         webhook_url = f"{public_url}/webhook"
-        await telegram_client.set_webhook(webhook_url)
+        await telegram_client.set_webhook(
+            webhook_url, secret_token=TELEGRAM_BOT_SECRET_TOKEN
+        )
         logger.info(f"Telegram webhook set to: {webhook_url}")
         return True
     except TelegramBotAPIError as ex:
@@ -358,7 +367,33 @@ async def handle_incoming_message(message: dict[str, Any]) -> None:
             logger.error(f"Telegram Error sending message: {ex}")
 
 
-@app.post("/webhook")
+async def require_valid_api_secret_token(
+    x_telegram_bot_api_secret_token: Annotated[str, Header()],
+):
+    """Validates the X-Telegram-Bot-Api-Secret-Token header.
+
+    This function checks if the provided secret token matches the expected
+    environment variable `TELEGRAM_BOT_SECRET_TOKEN`. If they do not match,
+    it raises an HTTPException with a 401 status code.
+
+    Args:
+        x_telegram_bot_api_secret_token (str): The secret token provided in the
+            'X-Telegram-Bot-Api-Secret-Token' header of the incoming request.
+
+    Raises:
+        HTTPException: If the provided token does not match the expected secret.
+
+    Returns:
+        str: The validated secret token if it is valid.
+    """
+    if x_telegram_bot_api_secret_token != TELEGRAM_BOT_SECRET_TOKEN:
+        raise HTTPException(
+            status_code=401, detail="X-Telegram-Bot-Api-Secret-Token header invalid"
+        )
+    return x_telegram_bot_api_secret_token
+
+
+@app.post("/webhook", dependencies=[Depends(require_valid_api_secret_token)])
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Webhook endpoint that receives Telegram updates.
