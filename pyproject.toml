@@ -13,4 +13,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pyngrok>=7.3.0",
+    "pytest>=8.4.2",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+testpaths = ["tests"]

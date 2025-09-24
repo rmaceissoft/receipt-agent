@@ -41,6 +41,8 @@ class AppSettings(BaseSettings):
         telegram_bot_token (str): The secret token for the Telegram bot API.
         telegram_bot_secret_token (Optional[str]): An optional secret token for
             webhook validation, used to secure the webhook.
+        logfire_send_to_logfire (bool | Literal["if-token-present"] | None): Controls
+            whether logs are sent to Logfire. Defaults to "if-token-present".
     """
 
     use_ngrok: bool = False
@@ -48,6 +50,9 @@ class AppSettings(BaseSettings):
     render_external_url: Optional[str] = None
     telegram_bot_token: str
     telegram_bot_secret_token: Optional[str] = None
+    logfire_send_to_logfire: bool | Literal["if-token-present"] | None = (
+        "if-token-present"
+    )
 
 
 @lru_cache
@@ -345,7 +350,9 @@ async def lifespan(app: FastAPI):
     Yields:
         None
     """
-    settings = get_app_settings()
+    # Workaround: Allows `get_app_settings` dependency to be overridden for testing,
+    # as `Depends` is not available in lifespan.
+    settings = app.dependency_overrides.get(get_app_settings, get_app_settings)()
     telegram_client = get_telegram_bot_client(settings.telegram_bot_token)
     public_url, needs_ngrok_cleanup = _get_public_url(settings)
     if public_url:
@@ -366,7 +373,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-logfire.configure(service_name="telegram-webhook", send_to_logfire="if-token-present")
+logfire.configure(service_name="telegram-webhook")
 logfire.instrument_fastapi(app)
 logfire.instrument_pydantic_ai()
 
