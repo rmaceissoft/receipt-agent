@@ -347,7 +347,7 @@ async def lifespan(app: FastAPI):
     """
     settings = get_app_settings()
     telegram_client = get_telegram_bot_client(settings.telegram_bot_token)
-    public_url, needs_ngrok_cleanup = _get_public_url()
+    public_url, needs_ngrok_cleanup = _get_public_url(settings)
     if public_url:
         # set telegram bot webhook
         is_webhook_setup_successful = await _setup_webhook(
@@ -497,7 +497,8 @@ async def webhook(
     body = await request.json()
     message = body.get("message", {})
     if message:
-        background_tasks.add_task(handle_incoming_message, message)
+        telegram_client = get_telegram_bot_client(settings.telegram_bot_token)
+        background_tasks.add_task(handle_incoming_message, message, telegram_client)
 
     return {"ok": True}
 
