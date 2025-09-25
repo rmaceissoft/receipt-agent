@@ -1597,6 +1597,7 @@ dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "logfire", extra = ["fastapi"] },
     { name = "pydantic-ai", extra = ["logfire"] },
+    { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
 
@@ -1610,6 +1611,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.116.1" },
     { name = "logfire", extras = ["fastapi"], specifier = ">=4.3.6" },
     { name = "pydantic-ai", extras = ["logfire"], specifier = ">=0.8.0" },
+    { name = "pydantic-settings", specifier = ">=2.10.1" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
 ]
 

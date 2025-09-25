@@ -7,29 +7,60 @@ The webhook receives incoming messages and automatically responds to users.
 """
 
 import logging
-import os
 import sys
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from typing import Annotated, Any, Literal, Optional
 
 import httpx
 import logfire
 from dotenv import load_dotenv
 
-
-load_dotenv()
+load_dotenv()  # Load environment variables from .env file. This is needed for variables like GITHUB_API_KEY, which are not managed by AppSettings.
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo, ReceiptProcessingError
 
 
-USE_NGROK = os.getenv("USE_NGROK")
-USE_RENDER = os.getenv("RENDER")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_BOT_SECRET_TOKEN = os.getenv("TELEGRAM_BOT_SECRET_TOKEN")
-
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+class AppSettings(BaseSettings):
+    """
+    Application settings for the Telegram webhook.
+
+    Attributes:
+        use_ngrok (bool): Whether to use ngrok for local development. Defaults to False.
+        on_render (bool): Indicates if the application is running on Render.com.
+            Defaults to False, aliased from "render" environment variable.
+        render_external_url (Optional[str]): The external URL provided by Render.com
+            when deployed. Required if `on_render` is True.
+        telegram_bot_token (str): The secret token for the Telegram bot API.
+        telegram_bot_secret_token (Optional[str]): An optional secret token for
+            webhook validation, used to secure the webhook.
+    """
+
+    use_ngrok: bool = False
+    on_render: bool = Field(alias="render", default=False)
+    render_external_url: Optional[str] = None
+    telegram_bot_token: str
+    telegram_bot_secret_token: Optional[str] = None
+
+
+@lru_cache
+def get_app_settings() -> AppSettings:
+    """Retrieves the application settings.
+
+    This function is cached to ensure that `AppSettings` are loaded only once
+    from environment variables.
+
+    Returns:
+        AppSettings: An instance of the application settings.
+    """
+    return AppSettings()
 
 
 class TelegramBotAPIError(Exception):
@@ -185,25 +216,43 @@ class TelegramBotClient:
         return await self._make_request("GET", "getWebhookInfo")
 
 
-# Create Telegram client instance at module level
-telegram_client = TelegramBotClient(bot_token=TELEGRAM_BOT_TOKEN)
+@lru_cache
+def get_telegram_bot_client(token: str) -> TelegramBotClient:
+    """Retrieves a cached instance of the TelegramBotClient.
+
+    This function is cached to ensure that the `TelegramBotClient` is
+    instantiated only once for a given bot token, promoting efficient
+    resource usage.
+
+    Args:
+        token (str): The secret token for the Telegram bot API.
+
+    Returns:
+        TelegramBotClient: An instance of the Telegram bot client.
+    """
+    return TelegramBotClient(bot_token=token)
 
 
-def _get_public_url() -> tuple[str | None, bool]:
+def _get_public_url(settings: AppSettings) -> tuple[str | None, bool]:
     """
     Get the public URL for the service and whether it needs cleanup.
 
+    Args:
+        settings (AppSettings): Application settings containing configuration for Render and ngrok.
+
     Returns:
-        tuple: (public_url, needs_cleanup)
+        tuple: A tuple containing:
+            - public_url (str | None): The public URL of the service, or None if not determined.
+            - needs_cleanup (bool): True if the public URL was obtained via ngrok and needs cleanup, False otherwise.
     """
     _public_url = None
     _needs_ngrok_cleanup = False
 
     # Check if running on Render.com
-    if USE_RENDER:
-        _public_url = os.getenv("RENDER_EXTERNAL_URL")
+    if settings.on_render:
+        _public_url = settings.render_external_url
         logger.info(f"Using Render URL: {_public_url}")
-    elif USE_NGROK:
+    elif settings.use_ngrok:
         # open ngrok tunnel
         from pyngrok import ngrok
         from pyngrok.exception import PyngrokError
@@ -236,13 +285,25 @@ def _cleanup_ngrok(public_url: str) -> None:
         pass  # Suppress cleanup errors
 
 
-async def _setup_webhook(public_url: str) -> bool:
-    """Set up Telegram webhook."""
+async def _setup_webhook(
+    public_url: str,
+    telegram_client: TelegramBotClient,
+    secret_token: Optional[str] = None,
+) -> bool:
+    """
+    Set up the Telegram webhook.
+
+    Args:
+        public_url (str): The public URL where the webhook will be exposed.
+        telegram_client (TelegramBotClient): The client for interacting with the Telegram Bot API.
+        secret_token (Optional[str]): An optional secret token for webhook validation.
+
+    Returns:
+        bool: True if the webhook was set up successfully, False otherwise.
+    """
     try:
         webhook_url = f"{public_url}/webhook"
-        await telegram_client.set_webhook(
-            webhook_url, secret_token=TELEGRAM_BOT_SECRET_TOKEN
-        )
+        await telegram_client.set_webhook(webhook_url, secret_token=secret_token)
         logger.info(f"Telegram webhook set to: {webhook_url}")
         return True
     except TelegramBotAPIError as ex:
@@ -250,8 +311,13 @@ async def _setup_webhook(public_url: str) -> bool:
         return False
 
 
-async def _cleanup_webhook() -> None:
-    """Remove Telegram webhook."""
+async def _cleanup_webhook(telegram_client: TelegramBotClient) -> None:
+    """
+    Remove Telegram webhook.
+
+    Args:
+        telegram_client (TelegramBotClient): The client for interacting with the Telegram Bot API.
+    """
     try:
         await telegram_client.delete_webhook()
         logger.info("Telegram webhook deleted")
@@ -262,11 +328,16 @@ async def _cleanup_webhook() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    FastAPI lifespan context manager for managing ngrok tunnel and Telegram webhook.
+    FastAPI lifespan context manager for managing the Telegram webhook and associated infrastructure.
 
-    This context manager handles the setup and teardown of an ngrok tunnel
-    and the Telegram bot webhook. If USE_NGROK is enabled, it establishes
-    a tunnel, sets the webhook, and cleans them up on exit.
+    This context manager performs the following actions:
+    1. Determines the public URL for the webhook, either by establishing an ngrok tunnel
+       (if `USE_NGROK` is enabled) or by using the `RENDER_EXTERNAL_URL` (if deployed on Render.com).
+    2. Sets up the Telegram bot webhook using the determined public URL.
+    3. Handles cleanup:
+       - If the webhook setup fails and an ngrok tunnel was established, the ngrok tunnel is cleaned up.
+       - On application shutdown, the Telegram webhook is deleted.
+       - If an ngrok tunnel was established, it is disconnected on application shutdown.
 
     Args:
         app (FastAPI): The FastAPI application instance.
@@ -274,16 +345,20 @@ async def lifespan(app: FastAPI):
     Yields:
         None
     """
+    settings = get_app_settings()
+    telegram_client = get_telegram_bot_client(settings.telegram_bot_token)
     public_url, needs_ngrok_cleanup = _get_public_url()
     if public_url:
         # set telegram bot webhook
-        is_webhook_setup_successful = await _setup_webhook(public_url)
+        is_webhook_setup_successful = await _setup_webhook(
+            public_url, telegram_client, settings.telegram_bot_secret_token
+        )
         if not is_webhook_setup_successful and needs_ngrok_cleanup:
             _cleanup_ngrok(public_url)
             public_url = None
     yield
     if public_url:
-        await _cleanup_webhook()
+        await _cleanup_webhook(telegram_client)
         if needs_ngrok_cleanup:
             _cleanup_ngrok(public_url)
 
@@ -322,7 +397,9 @@ def _format_html_receipt_data_for_telegram(receipt_data: ReceiptInfo) -> str:
     return _html
 
 
-async def handle_incoming_message(message: dict[str, Any]) -> None:
+async def handle_incoming_message(
+    message: dict[str, Any], telegram_client: TelegramBotClient
+) -> None:
     """
     Process incoming Telegram message containing receipt photos
 
@@ -369,16 +446,19 @@ async def handle_incoming_message(message: dict[str, Any]) -> None:
 
 async def require_valid_api_secret_token(
     x_telegram_bot_api_secret_token: Annotated[str, Header()],
+    settings: Annotated[AppSettings, Depends(get_app_settings)],
 ):
     """Validates the X-Telegram-Bot-Api-Secret-Token header.
 
     This function checks if the provided secret token matches the expected
-    environment variable `TELEGRAM_BOT_SECRET_TOKEN`. If they do not match,
+    `telegram_bot_secret_token` from the application settings. If they do not match,
     it raises an HTTPException with a 401 status code.
 
     Args:
         x_telegram_bot_api_secret_token (str): The secret token provided in the
             'X-Telegram-Bot-Api-Secret-Token' header of the incoming request.
+        settings (AppSettings): Application settings, injected via FastAPI's dependency
+            injection, containing the expected `telegram_bot_secret_token`.
 
     Raises:
         HTTPException: If the provided token does not match the expected secret.
@@ -386,7 +466,7 @@ async def require_valid_api_secret_token(
     Returns:
         str: The validated secret token if it is valid.
     """
-    if x_telegram_bot_api_secret_token != TELEGRAM_BOT_SECRET_TOKEN:
+    if x_telegram_bot_api_secret_token != settings.telegram_bot_secret_token:
         raise HTTPException(
             status_code=401, detail="X-Telegram-Bot-Api-Secret-Token header invalid"
         )
@@ -394,7 +474,11 @@ async def require_valid_api_secret_token(
 
 
 @app.post("/webhook", dependencies=[Depends(require_valid_api_secret_token)])
-async def webhook(request: Request, background_tasks: BackgroundTasks):
+async def webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    settings: Annotated[AppSettings, Depends(get_app_settings)],
+):
     """
     Webhook endpoint that receives Telegram updates.
 
