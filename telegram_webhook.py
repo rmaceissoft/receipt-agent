@@ -453,31 +453,43 @@ async def handle_incoming_message(
 
 
 async def require_valid_api_secret_token(
-    x_telegram_bot_api_secret_token: Annotated[str, Header()],
     settings: Annotated[AppSettings, Depends(get_app_settings)],
+    x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None,
 ):
-    """Validates the X-Telegram-Bot-Api-Secret-Token header.
+    """Validates the X-Telegram-Bot-Api-Secret-Token header if configured.
 
-    This function checks if the provided secret token matches the expected
-    `telegram_bot_secret_token` from the application settings. If they do not match,
-    it raises an HTTPException with a 401 status code.
+    If `settings.telegram_bot_secret_token` is set, this function checks if the
+    `X-Telegram-Bot-Api-Secret-Token` header is present and matches the configured
+    secret. If the header is missing or invalid when a secret is configured, it
+    raises an `HTTPException` with a 401 status code. If no secret is configured
+    in settings, the header is not validated, and the function proceeds without error.
 
     Args:
-        x_telegram_bot_api_secret_token (str): The secret token provided in the
-            'X-Telegram-Bot-Api-Secret-Token' header of the incoming request.
         settings (AppSettings): Application settings, injected via FastAPI's dependency
             injection, containing the expected `telegram_bot_secret_token`.
+        x_telegram_bot_api_secret_token (str | None): The secret token provided in the
+            'X-Telegram-Bot-Api-Secret-Token' header of the incoming request, or None
+            if the header is not present.
 
     Raises:
-        HTTPException: If the provided token does not match the expected secret.
+        HTTPException: If `settings.telegram_bot_secret_token` is configured and the
+            `X-Telegram-Bot-Api-Secret-Token` header is missing or does not match.
 
     Returns:
-        str: The validated secret token if it is valid.
+        str | None: The value of the `X-Telegram-Bot-Api-Secret-Token` header, or
+            `None` if it was not provided.
     """
-    if x_telegram_bot_api_secret_token != settings.telegram_bot_secret_token:
-        raise HTTPException(
-            status_code=401, detail="X-Telegram-Bot-Api-Secret-Token header invalid"
-        )
+    if settings.telegram_bot_secret_token:
+        error_type = None
+        if x_telegram_bot_api_secret_token is None:
+            error_type = "missing"
+        elif x_telegram_bot_api_secret_token != settings.telegram_bot_secret_token:
+            error_type = "invalid"
+        if error_type:
+            raise HTTPException(
+                status_code=401,
+                detail=f"X-Telegram-Bot-Api-Secret-Token header {error_type}",
+            )
     return x_telegram_bot_api_secret_token
 
 
