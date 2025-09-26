@@ -14,7 +14,7 @@ def get_test_app_settings() -> AppSettings:
         use_ngrok=False,
         telegram_bot_token="token123",
         telegram_bot_secret_token="secret123",
-        logfire_send_to_logfire=False,
+        disable_logfire=True,
     )
 
 
