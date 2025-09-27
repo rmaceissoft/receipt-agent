@@ -126,3 +126,4 @@ async def run_receipt_agent(
     except AgentRunError as ex:
         logger.error(f"Error processing receipt: {ex}")
         raise ReceiptProcessingError(f"Error processing receipt: {ex}")
+

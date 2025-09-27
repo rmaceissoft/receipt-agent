@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from telegram_webhook import AppSettings, app, get_app_settings
+from app.main import AppSettings, app, get_app_settings
 
 
 def _app_settings_factory(**kwargs) -> Callable[[], AppSettings]:
@@ -93,7 +93,7 @@ def test_webhook_when_secret_token_is_configured_and_correct_in_request_then_it_
     test_client,
 ):
     with patch(
-        "telegram_webhook.BackgroundTasks.add_task", return_value=None
+        "app.main.BackgroundTasks.add_task", return_value=None
     ) as mock_add_task:
         test_message = {"chat": {"id": 123}}
         resp = test_client.post(
@@ -114,7 +114,7 @@ def test_webhook_when_secret_token_is_not_configured_and_missing_in_request_then
     test_client,
 ):
     with patch(
-        "telegram_webhook.BackgroundTasks.add_task", return_value=None
+        "app.main.BackgroundTasks.add_task", return_value=None
     ) as mock_add_task:
         test_message = {"chat": {"id": 123}}
         resp = test_client.post("/webhook", json={"message": test_message})

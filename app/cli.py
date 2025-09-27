@@ -18,7 +18,12 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file
 
-from agent import InvalidReceipt, ReceiptInfo, ReceiptProcessingError, run_receipt_agent
+from app.agent import (
+    InvalidReceipt,
+    ReceiptInfo,
+    ReceiptProcessingError,
+    run_receipt_agent,
+)
 
 
 def main():
@@ -70,3 +75,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

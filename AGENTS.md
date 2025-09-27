@@ -2,16 +2,16 @@
 
 ## Project Structure & Module Organization
 - `agent.py` — Core AI agent (pydantic-ai + GitHub Models) and types.
-- `main.py` — CLI entry to process a local receipt image.
-- `telegram_webhook.py` — FastAPI webhook for Telegram bot, ngrok helper.
+- `app/cli.py` — CLI entry to process a local receipt image.
+- `app/main.py` — FastAPI webhook for Telegram bot, ngrok helper.
 - `pyproject.toml` — Python 3.12+, dependencies (managed with `uv`).
 - `render.yaml` — Render.com service configuration.
 - Add tests under `tests/` (e.g., `tests/test_agent.py`).
 
 ## Build, Test, and Development Commands
 - Install deps: `uv sync` (add `--group dev` for ngrok tooling).
-- Run CLI: `uv run python main.py path/to/receipt.jpg`.
-- Run webhook (auto-ngrok): `USE_NGROK=true uv run uvicorn telegram_webhook:app --reload`.
+- Run CLI: `uv run receipt-agent path/to/receipt.jpg` (or `uv run python -m app.cli path/to/receipt.jpg`).
+- Run webhook (auto-ngrok): `USE_NGROK=true uv run uvicorn app.main:app --reload`.
 - Health check: `curl http://127.0.0.1:8000/healthz`.
 - Deploy (Render): uses `render.yaml` with `uv sync --frozen` and `uvicorn`.
 
@@ -36,4 +36,3 @@
 - Create `.env` from `.env.copy`; do not commit `.env` or credentials.
 - Required env: `GITHUB_API_KEY`, `TELEGRAM_BOT_TOKEN`; optional: `TELEGRAM_BOT_SECRET_TOKEN`, `USE_NGROK`, `RENDER`, `RENDER_EXTERNAL_URL`.
 - Never embed secrets in code or tests; prefer env vars and local `.env`.
-

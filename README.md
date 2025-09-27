@@ -33,7 +33,7 @@ An AI-powered receipt processing system that extracts structured data from recei
 
 4. **Start telegram webhook server with automatic ngrok setup**
    ```bash
-   USE_NGROK=true uvicorn telegram_webhook:app --reload
+   USE_NGROK=true uvicorn app.main:app --reload
    ```
    This automatically:
    - Create an ngrok tunnel
@@ -47,7 +47,11 @@ An AI-powered receipt processing system that extracts structured data from recei
 Process receipts directly from your computer:
 
 ```bash
-python main.py path/to/receipt.jpg
+# via console script
+uv run receipt-agent path/to/receipt.jpg
+
+# or via module
+uv run python -m app.cli path/to/receipt.jpg
 ```
 
 ### Option 2: Telegram Bot

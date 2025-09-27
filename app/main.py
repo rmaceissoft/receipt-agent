@@ -21,7 +21,12 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Re
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-from agent import InvalidReceipt, run_receipt_agent, ReceiptInfo, ReceiptProcessingError
+from app.agent import (
+    InvalidReceipt,
+    run_receipt_agent,
+    ReceiptInfo,
+    ReceiptProcessingError,
+)
 
 
 # Configure logging
@@ -527,3 +532,4 @@ async def webhook(
 async def health_check():
     """Health check endpoint to verify service is running."""
     return {"status": "healthy"}
+
