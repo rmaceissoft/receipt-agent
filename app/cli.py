@@ -64,7 +64,7 @@ def main():
     try:
         receipt_output = asyncio.run(run_receipt_agent(receipt_path=receipt_filepath))
         if isinstance(receipt_output, ReceiptInfo):
-            save_receipt_into_db(receipt_output)
+            asyncio.run(save_receipt_into_db(receipt_output))
             logging.info("Receipt processed successfully:")
             logging.info(receipt_output.model_dump_json(indent=2))
         else:
@@ -77,4 +77,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

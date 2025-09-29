@@ -1,6 +1,9 @@
-from contextlib import contextmanager
-from typing import Generator
-from sqlmodel import Session, SQLModel, create_engine
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_app_settings
 
@@ -8,37 +11,46 @@ from app.config import get_app_settings
 app_settings = get_app_settings()
 
 
-engine = create_engine(
+engine = create_async_engine(
     app_settings.database_url, connect_args=app_settings.database_options
 )
 
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
+async def create_db_and_tables():
+    """Creates database tables based on SQLModel metadata.
+
+    This asynchronous function connects to the database using the configured engine,
+    starts a transaction, and then synchronously creates all tables defined in
+    `SQLModel.metadata`. This is typically used during application startup.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
 
 
-def get_db_session() -> Generator[Session, None, None]:
-    """Provides a database session.
+async def get_async_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Provides an asynchronous database session.
 
-    This generator function yields a SQLModel Session instance, ensuring
-    it is properly closed after use when used with `contextlib.contextmanager`.
+    This asynchronous generator function yields a `sqlmodel.ext.asyncio.session.AsyncSession`
+    instance. It ensures the session is properly closed after use, especially when
+    wrapped by `contextlib.asynccontextmanager` or used directly as an async context manager.
 
     Yields:
-        sqlmodel.Session: A database session instance.
+        sqlmodel.ext.asyncio.session.AsyncSession: An asynchronous database session instance.
     """
-    with Session(engine) as session:
+    async with AsyncSession(engine) as session:
         yield session
 
 
-db_session = contextmanager(get_db_session)
+async_db_session = asynccontextmanager(get_async_db_session)
 """
-Provides a database session as a context manager.
+Provides an async database session as an async context manager.
 
-This context manager can be used to obtain a `SQLModel.Session` instance,
+This context manager can be used to obtain a 
+`sqlmodel.ext.asyncio.session.AsyncSession` instance,
 ensuring that the session is properly closed after use.
 
 Usage:
-    with db_session() as session:
+    async with async_db_session() as session:
         # Perform database operations with 'session'
         ...
 """

@@ -329,7 +329,7 @@ async def lifespan(app: FastAPI):
 
     # create database tables on startup
     # TODO: For production, consider using a dedicated database migration script.
-    create_db_and_tables()
+    await create_db_and_tables()
 
     telegram_client = get_telegram_bot_client(settings.telegram_bot_token)
     public_url, needs_ngrok_cleanup = _get_public_url(settings)
@@ -408,7 +408,7 @@ async def handle_incoming_message(
         try:
             receipt_output = await run_receipt_agent(photo_url, text)
             if isinstance(receipt_output, ReceiptInfo):
-                save_receipt_into_db(receipt_output)
+                await save_receipt_into_db(receipt_output)
                 text = _format_html_receipt_data_for_telegram(receipt_output)
                 parse_mode = "HTML"
             elif isinstance(receipt_output, InvalidReceipt):
