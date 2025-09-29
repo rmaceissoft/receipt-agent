@@ -18,8 +18,6 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file. This is needed for variables like GITHUB_API_KEY, which are not managed by AppSettings.
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
-from pydantic import Field
-from pydantic_settings import BaseSettings
 
 from app.agent import (
     InvalidReceipt,
@@ -27,47 +25,13 @@ from app.agent import (
     ReceiptInfo,
     ReceiptProcessingError,
 )
+from app.config import AppSettings, get_app_settings
+from app.db import create_db_and_tables
+from app.operations import save_receipt_into_db
 
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-
-class AppSettings(BaseSettings):
-    """
-    Application settings for the Telegram webhook.
-
-    Attributes:
-        use_ngrok (bool): Whether to use ngrok for local development. Defaults to False.
-        on_render (bool): Indicates if the application is running on Render.com.
-            Defaults to False, aliased from "render" environment variable.
-        render_external_url (Optional[str]): The external URL provided by Render.com
-            when deployed. Required if `on_render` is True.
-        telegram_bot_token (str): The secret token for the Telegram bot API.
-        telegram_bot_secret_token (Optional[str]): An optional secret token for
-            webhook validation, used to secure the webhook.
-        disable_logfire (bool): Whether to disable Logfire instrumentation. Defaults to False.
-    """
-
-    use_ngrok: bool = False
-    on_render: bool = Field(alias="render", default=False)
-    render_external_url: Optional[str] = None
-    telegram_bot_token: str
-    telegram_bot_secret_token: Optional[str] = None
-    disable_logfire: bool = False
-
-
-@lru_cache
-def get_app_settings() -> AppSettings:
-    """Retrieves the application settings.
-
-    This function is cached to ensure that `AppSettings` are loaded only once
-    from environment variables.
-
-    Returns:
-        AppSettings: An instance of the application settings.
-    """
-    return AppSettings()
 
 
 class TelegramBotAPIError(Exception):
@@ -181,7 +145,7 @@ class TelegramBotClient:
     ) -> None:
         """
         Set the webhook URL for the bot.
-        
+
         This is equivalent to the curl command:
         curl -F "url=https://<ngrok_url>/webhook" \
           https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook
@@ -355,7 +319,6 @@ async def lifespan(app: FastAPI):
     # Workaround: Allows `get_app_settings` dependency to be overridden for testing,
     # as `Depends` is not available in lifespan.
     settings = app.dependency_overrides.get(get_app_settings, get_app_settings)()
-
     # setup instrumentation with logfire
     if not settings.disable_logfire:
         logfire.configure(
@@ -363,6 +326,10 @@ async def lifespan(app: FastAPI):
         )
         logfire.instrument_fastapi(app)
         logfire.instrument_pydantic_ai()
+
+    # create database tables on startup
+    # TODO: For production, consider using a dedicated database migration script.
+    await create_db_and_tables()
 
     telegram_client = get_telegram_bot_client(settings.telegram_bot_token)
     public_url, needs_ngrok_cleanup = _get_public_url(settings)
@@ -397,7 +364,7 @@ def _format_html_receipt_data_for_telegram(receipt_data: ReceiptInfo) -> str:
     """
     payment_method_display = receipt_data.payment_method.replace("_", " ").title()
     _html = f"""
-    🧾 <b>Receipt Details:</b>    
+    🧾 <b>Receipt Details:</b>
     📅 <b>Issued At:</b> {receipt_data.issued_at.strftime("%B %d, %Y at %I:%M %p")}
     🏢 <b>Vendor Name:</b> {receipt_data.vendor_name}
     🆔 <b>Vendor RUC:</b> {receipt_data.vendor_ruc}
@@ -441,6 +408,7 @@ async def handle_incoming_message(
         try:
             receipt_output = await run_receipt_agent(photo_url, text)
             if isinstance(receipt_output, ReceiptInfo):
+                await save_receipt_into_db(receipt_output)
                 text = _format_html_receipt_data_for_telegram(receipt_output)
                 parse_mode = "HTML"
             elif isinstance(receipt_output, InvalidReceipt):
@@ -532,4 +500,3 @@ async def webhook(
 async def health_check():
     """Health check endpoint to verify service is running."""
     return {"status": "healthy"}
-

@@ -4,7 +4,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import AppSettings, app, get_app_settings
+from app.main import app
+from app.config import AppSettings, get_app_settings
 
 
 def _app_settings_factory(**kwargs) -> Callable[[], AppSettings]:
